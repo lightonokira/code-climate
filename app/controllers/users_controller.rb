@@ -1,0 +1,109 @@
+class UsersController < ApplicationController
+    before_filter :authenticate_user!
+    before_action :set_user, only: [:show, :edit, :update, :destroy]
+    load_and_authorize_resource
+
+    respond_to :html
+
+    def new
+        @user = User.new
+        @roles = Role.all
+
+        respond_with(@user)
+    end
+
+    def search_query
+        @users = User.all.where("name LIKE ?", "%#{params[:q]}%").limit(10).pluck(:name).map { |obj| {name: obj} }
+        render json: @users
+    end
+    
+    def index
+        if params[:search]
+            @users = User.search(params[:search]).order("created_at DESC")
+        else
+            @users = User.all
+        end
+
+        respond_with(@users)
+    end
+    
+    def show
+        @user = User.find(params[:id])
+        rescue ActiveRecord::RecordNotFound
+        redirect_to(root_url, alert: 'User not found')
+    end
+    
+    def edit
+        @user = User.find(params[:id])
+        @roles = Role.all
+    end
+    
+    def create
+        @user = User.new(user_params)
+        if current_user.has_role?('admin')
+            assign_roles(params[:roles])
+        end
+        if @user.save
+            @log = Log.new(title: 'Created a new user', log_type: 'users', type_id: @user.id)
+            @log.save
+            redirect_to users_path, success: 'User was successfully created.'
+        else
+            render action: 'new' 
+        end
+    end
+    
+    def update
+        if params[:user][:password].blank? && params[:user][:password_confirmation].blank?
+            params[:user].delete(:password)
+            params[:user].delete(:password_confirmation)
+        end
+        if @user.update(user_params)
+            if current_user.has_role?('admin')
+                assign_roles(params[:roles])
+            end
+            @log = Log.new(title: 'A user has been updated', log_type: 'users', type_id: @user.id)
+            @log.save
+            redirect_to user_path, success: 'User was successfully updated.'
+        else
+            render action: 'edit'
+        end
+    end
+    
+    def destroy
+        if @user.destroy
+          redirect_to users_path, success: 'User was successfully deleted!'
+        @log = Log.new(title: 'A user has been deleted', log_type: 'users', type_id: @user.id)
+        @log.save
+        else
+          render action: 'index'
+        end
+    end
+
+    
+private
+    # Use callbacks to share common setup or constraints between actions.
+    def set_user
+        @user = User.find(params[:id])  
+        rescue ActiveRecord::RecordNotFound
+        redirect_to(root_url, alert: 'User not found') 
+    end
+
+    def assign_roles(roles)
+        if !@user.roles.empty?
+            @user.roles.delete_all
+        end
+
+        if !roles.blank?
+            roles.each do |rn|
+                @user.add_role(rn)
+            end
+        end
+    end
+
+
+    # Never trust parameters from the scary internet, only allow the white list through.
+    def user_params
+      params.require(:user).permit(:name, :phone, :email, :ic, :password, :password_confirmation, :image)
+    end
+    
+end
